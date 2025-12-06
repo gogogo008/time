@@ -336,7 +336,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN)
         val today = sdf.format(Date())
 
-        val appUsagesMap = _trackedApps.value.associate { it.packageName to it.goalTime }
+        val appUsagesMap = appUsageListFlow.value.associate { it.packageName to it.currentUsage }
 
         val data = mapOf(
             "date" to today,
@@ -352,7 +352,24 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ------------------- 개별 앱 목표 시간 업데이트 -------------------
+    fun uploadDailyGoalToFirebase(newGoals: Map<String, Int>) =
+        viewModelScope.launch(Dispatchers.IO) {
 
+            val uid = getCurrentUserUid() ?: return@launch
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.KOREAN).format(Date())
+
+            val data = mapOf(
+                "date" to today,
+                "appUsages" to newGoals
+            )
+
+            Firebase.firestore
+                .collection("users")
+                .document(uid)
+                .collection("goalHistory")
+                .document(today)
+                .set(data)
+        }
     fun dumpGoalTimesToLog() = viewModelScope.launch(Dispatchers.IO) {
         try {
             val allTracked = UsageRepository.getAllTrackedOnce() // suspend 함수이므로 launch 안에서 호출

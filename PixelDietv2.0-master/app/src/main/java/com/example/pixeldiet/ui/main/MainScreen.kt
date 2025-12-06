@@ -127,7 +127,7 @@ fun MainScreen(
             onSave = { newGoals: Map<String, Int>, totalGoalMinutes: Int? ->
                 // 1️⃣ 앱별 목표시간 DB + ViewModel 상태 한 번에 갱신
                 viewModel.saveTrackedAppsWithGoals(newGoals)
-                viewModel.uploadDailyUsageToFirebase()
+                viewModel.uploadDailyGoalToFirebase(newGoals)
 
                 // 2️⃣ 전체 목표시간 업데이트
                 viewModel.setOverallGoal(totalGoalMinutes)
