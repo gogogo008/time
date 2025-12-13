@@ -51,6 +51,17 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(viewModel: SharedViewModel = viewModel()) {
+    val isDataReady by viewModel.isDataReady.collectAsState()
+    Log.d("MainScreen", "isDataReady: $isDataReady")
+    if (!isDataReady) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     val context = LocalContext.current
     val activity = context as? Activity
     val coroutineScope = rememberCoroutineScope()
