@@ -46,8 +46,9 @@ import kotlinx.coroutines.tasks.await
 data class MemberUsage(
     val uid: String,
     val name: String,
-    var usage: Int,
+    var usageSeconds: Int,
     var isRunning: Boolean = false,
+    var lastStartTime: Long? = null
 )
 
 class GroupViewModel(private val repository: GroupRepository, private val usageDao: TrackedAppDao, application: Application,) : ViewModel() {
@@ -83,12 +84,11 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
     val memberIds: LiveData<List<String>> = _memberIds
     private var membersListener: ListenerRegistration? = null
 
-    private var usageTimerJob: Job? = null
-    private val timerScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var monitoringStarted = false
 
     private var appUsageMonitor: AppUsageMonitor? = null
 
-
+    private var observeStarted = false
     //========================================
 
     private val _selectedApp = MutableStateFlow<String?>(null)
@@ -149,7 +149,7 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
             // 방장 멤버 정보가 Firestore에 저장된 후 호출
             _selectedGroup.value?.let { group ->
                 _selectedApp.value = appId
-                //startAppMonitoring() // 바로 감시 시작
+
             }
         }
     }
@@ -198,161 +198,117 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
             _goalMinutes.value = minutes // UI 즉시 반영
         }
     }
+
+
     fun loadGroupMembers(groupId: String) {
-        viewModelScope.launch {
-            firestore.collection("groups")
-                .document(groupId)
-                .collection("members")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) return@addSnapshotListener
+        Log.d("GroupVM", "loadGroupMembers START groupId=$groupId")
 
-                    if (snapshot != null) {
-                        val members = snapshot.documents.mapNotNull { doc ->
-                            val uid = doc.id
-                            val name = doc.getString("name") ?: ""
-                            val usage = doc.getLong("usage")?.toInt() ?: 0
-                            val isRunning = doc.getBoolean("isRunning") ?: false
+        membersListener?.remove()
 
-                            MemberUsage(uid, name, usage, isRunning)
-                        }
-
-                        _groupMembers.value = members
-                    }
+        membersListener = firestore.collection("groups")
+            .document(groupId)
+            .collection("members")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("GroupVM", "members snapshot error", error)
+                    return@addSnapshotListener
                 }
-        }
+                if (snapshot == null) {
+                    Log.e("GroupVM", "members snapshot NULL")
+                    return@addSnapshotListener
+                }
+
+                Log.d("GroupVM", "members snapshot size=${snapshot.size()}")
+
+                val members = snapshot.documents.mapNotNull { doc ->
+                    Log.d(
+                        "GroupVM",
+                        "member doc ${doc.id} data=${doc.data}"
+                    )
+
+                    MemberUsage(
+                        uid = doc.id,
+                        name = doc.getString("name") ?: "",
+                        usageSeconds = (doc.getLong("usageSeconds") ?: 0L).toInt(),
+                        isRunning = doc.getBoolean("isRunning") ?: false,
+                        lastStartTime = doc.getLong("lastStartTime")
+                    )
+                }
+
+                _groupMembers.value = members
+            }
     }
+    private var observingGroupId: String? = null
 
     private fun observeMyGroups() {
+        if (observeStarted) return
+        observeStarted = true
         val uid = currentUserId ?: return
-        Log.d("GroupViewModel", "Starting observeMyGroups() for user $uid")
 
         firestore.collection("users")
             .document(uid)
             .collection("groups")
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot == null) {
-                    Log.d("GroupViewModel", "Snapshot is null")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("GroupVM", "observeMyGroups error", error)
                     return@addSnapshotListener
                 }
 
-                Log.d("GroupViewModel", "Snapshot listener triggered with ${snapshot.documents.size} documents")
+                if (snapshot == null || snapshot.isEmpty) {
+                    Log.d("GroupVM", "observeMyGroups empty")
+                    return@addSnapshotListener
+                }
 
-                snapshot.documents.forEach { doc ->
-                    val groupId = doc.getString("groupId") ?: return@forEach
-                    Log.d("GroupViewModel", "Found groupId in snapshot: $groupId")
+                val groupId = snapshot.documents
+                    .mapNotNull { it.getString("groupId") }
+                    .firstOrNull()
 
-                    viewModelScope.launch {
-                        val group = repository.getGroup(groupId)
-                        if (group != null) {
-                            _selectedGroup.value = group
-                            _selectedApp.value = group.appId
+                Log.d("GroupVM", "observeMyGroups found groupId=$groupId")
 
-                            Log.d(
-                                "GroupViewModel",
-                                "Setting selected group: ${group.groupId}, selected app: ${group.appId}"
-                            )
+                if (groupId == null || groupId == observingGroupId) return@addSnapshotListener
 
-                            if (_selectedApp.value != null) {
-                                Log.d("GroupViewModel", "Calling startAppMonitoring() for app ${_selectedApp.value}")
-                                startAppMonitoring()
-                            } else {
-                                Log.d("GroupViewModel", "selectedApp is null, skipping startAppMonitoring()")
-                            }
+                observingGroupId = groupId
 
-                            loadGroupMembers(groupId)
-                        } else {
-                            Log.d("GroupViewModel", "Repository returned null for groupId $groupId")
-                        }
+                viewModelScope.launch {
+                    val group = repository.getGroup(groupId)
+                    if (group == null) {
+                        Log.e("GroupVM", "❌ repository.getGroup returned null")
+                        return@launch
+                    }
+
+                    _selectedGroup.value = group
+                    _selectedApp.value = group.appId
+
+                    loadGroupMembers(groupId)
+
+                    if (group.appId != null) {
+                        startAppMonitoring()
                     }
                 }
             }
     }
 
 
-    private fun startUsageTimer(groupId: String) {
-        if (usageTimerJob?.isActive == true) return
-
-        Log.d("GroupViewModel", "Usage timer started")
-
-        usageTimerJob = timerScope.launch {
-            while (isActive) {
-                delay(60_000L)
-
-                val now = System.currentTimeMillis()
-
-                val updated = _groupMembers.value.map { member ->
-                    if (member.isRunning) {
-                        val newUsage = member.usage + 1
-                        Log.d("GroupViewModel", "++ ${member.name}: $newUsage 분")
-
-                        firestore.collection("groups")
-                            .document(groupId)
-                            .collection("members")
-                            .document(member.uid)
-                            .update(
-                                mapOf(
-                                    "usage" to newUsage,
-                                    "updatedAt" to now
-                                )
-                            )
-
-                        member.copy(usage = newUsage)
-                    } else member
-                }
-
-                _groupMembers.value = updated
-            }
-        }
-    }
 
 
-
+    private var monitoringAppId: String? = null
 
     fun startAppMonitoring() {
         val group = _selectedGroup.value ?: return
         val appId = _selectedApp.value ?: return
 
-        Log.d("GroupViewModel", "startAppMonitoring for $appId")
+        if (monitoringAppId == appId) return
+        monitoringAppId = appId
 
-        // AppUsageMonitor만 재시작
-        appUsageMonitor?.stopMonitoring()
-        appUsageMonitor = AppUsageMonitor(context, group.groupId, appId)
-        appUsageMonitor?.startMonitoring()
+        appUsageMonitor?.stop()
 
-        // 🔥 타이머는 여기서 1번만 시작
-        startUsageTimer(group.groupId)
-
-        // members 상태 동기화만 담당
-        membersListener?.remove()
-        membersListener = firestore.collection("groups")
-            .document(group.groupId)
-            .collection("members")
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot == null) return@addSnapshotListener
-
-                _groupMembers.value = snapshot.documents.mapNotNull { doc ->
-                    MemberUsage(
-                        uid = doc.id,
-                        name = doc.getString("name") ?: "",
-                        usage = doc.getLong("usage")?.toInt() ?: 0,
-                        isRunning = doc.getBoolean("isRunning") ?: false
-                    )
-                }
-            }
-    }
-
-
-
-    fun stopAppMonitoring() {
-        Log.d("GroupViewModel", "Stopping AppUsageMonitor ONLY")
-
-        appUsageMonitor?.stopMonitoring()
-        appUsageMonitor = null
-
-        membersListener?.remove()
-        membersListener = null
-
-        // ❌ usageTimerJob 취소하면 안 됨
+        appUsageMonitor = AppUsageMonitor(
+            context = context,
+            groupId = group.groupId,
+            appId = appId,
+            scope = viewModelScope   // ⭐⭐⭐ 핵심
+        )
+        appUsageMonitor?.start()
     }
 
     fun addSelectedMembers(groupId: String, memberIds: List<String>) {
@@ -400,8 +356,9 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
 
                     val memberData = mapOf(
                         "name" to name,                  // 이름
-                        "usage" to 0,                     // 초기 사용시간
-                        "isRunning" to false,             // 실행 상태
+                        "usageSeconds" to 0,                     // 초기 사용시간
+                        "isRunning" to false,
+                        "lastStartTime" to null
                     )
 
                     // members 서브컬렉션에 저장
@@ -427,54 +384,97 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
     }
 
 
-
+    override fun onCleared() {
+        super.onCleared()
+        // 아무 것도 cancel 하지 말아도 됨
+        // viewModelScope가 자동 종료됨
+    }
 }
 
 class AppUsageMonitor(
     private val context: Context,
     private val groupId: String,
-    private val appId: String
-) {
+    private val appId: String,
+    private val scope: CoroutineScope
+) {    private val monitorScope =
+    CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val firestore = FirebaseFirestore.getInstance()
-    private val currentUserId get() = FirebaseAuth.getInstance().currentUser?.uid
-    private val monitorScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val uid get() = FirebaseAuth.getInstance().currentUser?.uid
 
-    fun startMonitoring() {
-        monitorScope.launch {
+    private var lastRunning: Boolean? = null
+    private var job: Job? = null
+    fun start() {
+        job = monitorScope.launch {
             while (isActive) {
-                delay(1_000L) // 1초 단위로 앱 foreground 체크
-                val isRunning = isAppInForeground(appId)
-                Log.d("AppUsageMonitor", "[$appId] isRunning=$isRunning")
-                updateRunningStatus(isRunning) // isRunning만 갱신
+                delay(1_000L)
+                val running = isAppInForeground(appId)
+                if (running != lastRunning) {
+                    onRunningChanged(running)
+                    lastRunning = running
+                }
             }
         }
     }
 
-    fun stopMonitoring() {
+    fun stop() {
+        job?.cancel()
         monitorScope.cancel()
     }
 
-    @SuppressLint("ServiceCast")
-    private fun isAppInForeground(packageName: String): Boolean {
-        val usageStatsManager =
-            context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val now = System.currentTimeMillis()
-        val stats = usageStatsManager.queryUsageStats(
-            UsageStatsManager.INTERVAL_DAILY,
-            now - 10_000,
-            now
-        )
-        val lastUsedApp = stats.maxByOrNull { it.lastTimeUsed }?.packageName
-        return lastUsedApp == packageName
-    }
-
-    private suspend fun updateRunningStatus(isRunning: Boolean) {
-        val uid = currentUserId ?: return
-        firestore.collection("groups")
+    private suspend fun onRunningChanged(isRunning: Boolean) {
+        val userId = uid ?: return
+        val ref = firestore.collection("groups")
             .document(groupId)
             .collection("members")
-            .document(uid)
-            .update("isRunning", isRunning)
-            .await()
+            .document(userId)
+
+        try {
+            if (isRunning) {
+                ref.update(
+                    mapOf(
+                        "isRunning" to true,
+                        "lastStartTime" to System.currentTimeMillis()
+                    )
+                ).await()
+            } else {
+                firestore.runTransaction { tx ->
+                    val snap = tx.get(ref)
+                    val lastStart = snap.getLong("lastStartTime") ?: return@runTransaction
+                    val prev = snap.getLong("usageSeconds") ?: 0L
+                    val added = (System.currentTimeMillis() - lastStart) / 1000
+
+                    tx.update(
+                        ref,
+                        mapOf(
+                            "isRunning" to false,
+                            "lastStartTime" to null,
+                            "usageSeconds" to prev + added
+                        )
+                    )
+                }.await()
+            }
+        } catch (e: Exception) {
+            Log.e("AppUsageMonitor", "Firestore update failed", e)
+            // ❗ 여기서 앱은 살아있음
+        }
+    }
+
+
+    private fun isAppInForeground(packageName: String): Boolean {
+        return try {
+            val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val now = System.currentTimeMillis()
+            val stats = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                now - 10_000,
+                now
+            )
+            stats.maxByOrNull { it.lastTimeUsed }?.packageName == packageName
+        } catch (e: Exception) {
+            Log.e("UsageStats", "error", e)
+            false
+        }
     }
 }
+
+
