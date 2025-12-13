@@ -116,7 +116,6 @@ class GroupRepository(
                         "name" to userName,             // profile/main에서 가져온 이름
                         "usage" to 0,
                         "isRunning" to false,
-                        "updatedAt" to System.currentTimeMillis()
                     )
                 )
                 .addOnSuccessListener { Log.d("Firestore", "방장 멤버 정보 추가 성공") }

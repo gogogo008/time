@@ -48,7 +48,6 @@ data class MemberUsage(
     val name: String,
     var usage: Int,
     var isRunning: Boolean = false,
-    var updatedAt: Long = 0L
 )
 
 class GroupViewModel(private val repository: GroupRepository, private val usageDao: TrackedAppDao, application: Application,) : ViewModel() {
@@ -150,7 +149,7 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
             // 방장 멤버 정보가 Firestore에 저장된 후 호출
             _selectedGroup.value?.let { group ->
                 _selectedApp.value = appId
-                startAppMonitoring() // 바로 감시 시작
+                //startAppMonitoring() // 바로 감시 시작
             }
         }
     }
@@ -213,9 +212,8 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
                             val name = doc.getString("name") ?: ""
                             val usage = doc.getLong("usage")?.toInt() ?: 0
                             val isRunning = doc.getBoolean("isRunning") ?: false
-                            val updatedAt = doc.getLong("updatedAt") ?: 0L
 
-                            MemberUsage(uid, name, usage, isRunning, updatedAt)
+                            MemberUsage(uid, name, usage, isRunning)
                         }
 
                         _groupMembers.value = members
@@ -272,36 +270,37 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
 
 
     private fun startUsageTimer(groupId: String) {
-        if (usageTimerJob?.isActive == true) {
-            Log.d("GroupViewModel", "Usage timer already running")
-            return
-        }
+        if (usageTimerJob?.isActive == true) return
 
-        Log.d("GroupViewModel", "Starting usage timer for group $groupId")
+        Log.d("GroupViewModel", "Usage timer started")
 
         usageTimerJob = timerScope.launch {
             while (isActive) {
-                delay(60_000L) // 1분 단위로 측정
+                delay(60_000L)
+
                 val now = System.currentTimeMillis()
-                val updatedList = _groupMembers.value.map { member ->
+
+                val updated = _groupMembers.value.map { member ->
                     if (member.isRunning) {
-                        member.usage += 1
-                        Log.d("GroupViewModel", "Incrementing usage for ${member.name}: ${member.usage}분")
-                        // Firestore 업데이트
+                        val newUsage = member.usage + 1
+                        Log.d("GroupViewModel", "++ ${member.name}: $newUsage 분")
+
                         firestore.collection("groups")
                             .document(groupId)
                             .collection("members")
                             .document(member.uid)
                             .update(
                                 mapOf(
-                                    "usage" to member.usage,
-                                    "updatedAt" to now // 1분 단위로만 갱신
+                                    "usage" to newUsage,
+                                    "updatedAt" to now
                                 )
                             )
-                        member
+
+                        member.copy(usage = newUsage)
                     } else member
                 }
-                _groupMembers.value = updatedList
+
+                _groupMembers.value = updated
             }
         }
     }
@@ -313,36 +312,31 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
         val group = _selectedGroup.value ?: return
         val appId = _selectedApp.value ?: return
 
-        Log.d("GroupViewModel", "Calling startAppMonitoring() for app $appId")
+        Log.d("GroupViewModel", "startAppMonitoring for $appId")
 
-        // 이미 실행 중이면 중복 제거
-        stopAppMonitoring()
-        Log.d("GroupViewModel", "Stopping AppUsageMonitor and usage timer")
-
-        // 1️⃣ AppUsageMonitor 시작 (실시간 foreground 체크)
+        // AppUsageMonitor만 재시작
+        appUsageMonitor?.stopMonitoring()
         appUsageMonitor = AppUsageMonitor(context, group.groupId, appId)
         appUsageMonitor?.startMonitoring()
-        Log.d("GroupViewModel", "Starting AppUsageMonitor for $appId")
 
-        // 2️⃣ Firestore snapshot listener (멤버 상태 갱신만)
+        // 🔥 타이머는 여기서 1번만 시작
+        startUsageTimer(group.groupId)
+
+        // members 상태 동기화만 담당
+        membersListener?.remove()
         membersListener = firestore.collection("groups")
             .document(group.groupId)
             .collection("members")
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot == null) return@addSnapshotListener
-                val members = snapshot.documents.mapNotNull { doc ->
-                    val uid = doc.id
-                    val name = doc.getString("name") ?: ""
-                    val usage = doc.getLong("usage")?.toInt() ?: 0
-                    val isRunning = doc.getBoolean("isRunning") ?: false
-                    val updatedAt = doc.getLong("updatedAt") ?: 0L
-                    MemberUsage(uid, name, usage, isRunning, updatedAt)
-                }
-                _groupMembers.value = members
 
-                // 타이머는 이미 실행 중인지 확인 후 시작
-                if (usageTimerJob?.isActive != true) {
-                    startUsageTimer(group.groupId)
+                _groupMembers.value = snapshot.documents.mapNotNull { doc ->
+                    MemberUsage(
+                        uid = doc.id,
+                        name = doc.getString("name") ?: "",
+                        usage = doc.getLong("usage")?.toInt() ?: 0,
+                        isRunning = doc.getBoolean("isRunning") ?: false
+                    )
                 }
             }
     }
@@ -350,13 +344,15 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
 
 
     fun stopAppMonitoring() {
-        Log.d("GroupViewModel", "Stopping AppUsageMonitor and usage timer")
+        Log.d("GroupViewModel", "Stopping AppUsageMonitor ONLY")
+
         appUsageMonitor?.stopMonitoring()
         appUsageMonitor = null
+
         membersListener?.remove()
         membersListener = null
-        usageTimerJob?.cancel()
-        usageTimerJob = null
+
+        // ❌ usageTimerJob 취소하면 안 됨
     }
 
     fun addSelectedMembers(groupId: String, memberIds: List<String>) {
@@ -406,7 +402,6 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
                         "name" to name,                  // 이름
                         "usage" to 0,                     // 초기 사용시간
                         "isRunning" to false,             // 실행 상태
-                        "updatedAt" to System.currentTimeMillis() // 타임스탬프
                     )
 
                     // members 서브컬렉션에 저장
