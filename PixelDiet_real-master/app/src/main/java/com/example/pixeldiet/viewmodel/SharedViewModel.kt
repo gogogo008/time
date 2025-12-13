@@ -6,6 +6,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.pixeldiet.backup.AppBackupManager
 import com.example.pixeldiet.data.DatabaseProvider
 import com.example.pixeldiet.data.TrackedAppEntity
 import com.example.pixeldiet.model.*
@@ -52,7 +53,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
     val trackedAppsFlow: StateFlow<List<TrackedAppEntity>> = _trackedApps
 
     // ✅ 로딩 게이트: 기본은 false (동기화/초기 로딩 끝나면 true)
-    private val _isDataReady = MutableStateFlow(true)
+    val _isDataReady: StateFlow<Boolean> = AppBackupManager.isDataReady
     val isDataReady: StateFlow<Boolean> = _isDataReady
 
     private val _dailyDetailFlow = MutableStateFlow<List<Pair<AppUsage, Int>>>(emptyList())
@@ -125,16 +126,14 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
             val uid = getCurrentUserUid()
             if (uid == null) {
                 // 로그인 전 상태라면 UI가 영원히 로딩에 갇히지 않게 풀어줌
-                _isDataReady.value = true
+                //_isDataReady.value = true
                 return@launch
             }
 
         }
     }
 
-    fun markDataReady() {
-        _isDataReady.value = true
-    }
+
 
     // ------------------- SharedPreferences / Room 업데이트 -------------------
     fun updateTrackedPackages(newSet: Set<String>) {
@@ -183,7 +182,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
 
             // 로그아웃 직후에는 다시 로딩상태로 돌려도 되지만,
             // 현재 화면 네비게이션에서 Login으로 이동할 것이므로 true로 풀어둠
-            _isDataReady.value = true
+            //_isDataReady.value = true
             hasSyncedOnce = false
         }
     }
@@ -410,11 +409,11 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         if (!force && hasSyncedOnce) {
             // 이미 1회 동기화/초기 로딩 끝났으면, 이후에는 데이터만 새로 고치기
             refreshDataInternal(uid)
-            _isDataReady.value = true
+           // _isDataReady.value = true
             return
         }
 
-        _isDataReady.value = false
+        //_isDataReady.value = false
         try {
             syncRepository.syncFromFirestore(uid)
             hasSyncedOnce = true
@@ -424,7 +423,7 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Exception) {
             Log.e("SharedViewModel", "syncFromFirestore failed: $e")
         } finally {
-            _isDataReady.value = true
+           // _isDataReady.value = true
         }
     }
 

@@ -10,6 +10,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.liveData
 import androidx.lifecycle.viewModelScope
+import com.example.pixeldiet.backup.AppBackupManager
 import com.example.pixeldiet.data.TrackedAppDao
 import com.example.pixeldiet.data.TrackedAppEntity
 import com.example.pixeldiet.data.UserProfileDao
@@ -56,7 +57,8 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
    private val context = application.applicationContext
     private val _appList = MutableStateFlow<List<TrackedAppEntity>>(emptyList())
     val appList: StateFlow<List<TrackedAppEntity>> = _appList
-
+    val _isDataReady: StateFlow<Boolean> = AppBackupManager.isDataReady
+    val isDataReady: StateFlow<Boolean> = _isDataReady
     private val _friendList = MutableStateFlow<List<FriendRecord>>(emptyList())
     val friendList: StateFlow<List<FriendRecord>> = _friendList
     private val _showCreateDialog = MutableStateFlow(false)
@@ -141,6 +143,7 @@ class GroupViewModel(private val repository: GroupRepository, private val usageD
     fun closeCreateGroupDialog() {
         _showCreateDialog.value = false
     }
+
 
     // =============================================================
     fun createGroup(name: String, appId: String) = viewModelScope.launch {

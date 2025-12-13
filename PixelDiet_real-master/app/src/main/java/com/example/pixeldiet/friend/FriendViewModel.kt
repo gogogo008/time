@@ -2,6 +2,7 @@ package com.example.pixeldiet.ui.friend
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.pixeldiet.backup.AppBackupManager
 import com.example.pixeldiet.friend.FriendRecord
 import com.example.pixeldiet.friend.FriendRepository
 import com.example.pixeldiet.friend.FriendRequest
@@ -17,7 +18,8 @@ class FriendViewModel(val repository: FriendRepository) : ViewModel() {
 
     private val _friendList = MutableStateFlow<List<FriendRecord>>(emptyList())
     val friendList: StateFlow<List<FriendRecord>> = _friendList
-
+    val _isDataReady: StateFlow<Boolean> = AppBackupManager.isDataReady
+    val isDataReady: StateFlow<Boolean> = _isDataReady
     private val _friendRequestsReceived = MutableStateFlow<List<FriendRequest>>(emptyList())
     val friendRequestsReceived: StateFlow<List<FriendRequest>> = _friendRequestsReceived
 
@@ -81,4 +83,5 @@ class FriendViewModel(val repository: FriendRepository) : ViewModel() {
             }
         }
     }
+
 }

@@ -11,12 +11,16 @@ import com.example.pixeldiet.data.UserProfileDao
 import com.example.pixeldiet.data.UserProfileEntity
 import com.example.pixeldiet.friend.FriendRecord
 import com.example.pixeldiet.friend.group.GroupRecord
+import com.example.pixeldiet.friend.group.GroupViewModel
 import com.example.pixeldiet.repository.UsageRepository
+import com.example.pixeldiet.ui.friend.FriendViewModel
+import com.example.pixeldiet.viewmodel.SharedViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.gson.Gson
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -36,6 +40,7 @@ class BackupManager(
     private val groupDao: GroupDao,
     private val friendDao: FriendDao
 ) {
+
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
@@ -51,6 +56,7 @@ class BackupManager(
             Log.e("BackupManager", "initUser failed: $e")
         }
     }
+
 
     suspend fun signInWithGoogle(idToken: String) {
         try {
@@ -68,6 +74,7 @@ class BackupManager(
      * - 여기서는 Firestore에서 내려받아 Room에 저장까지만 수행한다.
      */
     suspend fun syncFromFirestore(uid: String) {
+        AppBackupManager.isDataReady.value = false
         if (uid.isBlank()) return
 
         Log.d("BackupManager", "===== Sync started for UID: $uid =====")
@@ -210,6 +217,6 @@ class BackupManager(
         }
 
         Log.d("BackupManager", "===== Sync finished for UID: $uid =====")
-        // ✅ 여기서 markDataReady() 같은 UI 호출은 하지 않음!
+        AppBackupManager.isDataReady.value = true
     }
 }

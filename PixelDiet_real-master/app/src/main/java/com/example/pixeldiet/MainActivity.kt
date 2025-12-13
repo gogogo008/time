@@ -30,9 +30,14 @@ import com.example.pixeldiet.worker.UsageCheckWorker
 import com.google.firebase.auth.FirebaseAuth
 import java.util.concurrent.TimeUnit
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.example.pixeldiet.backup.AppBackupManager
+import com.example.pixeldiet.backup.BackupManager
 //import androidx.lifecycle.lifecycleScope
 //import com.example.pixeldiet.backup.BackupManager
 import com.example.pixeldiet.backup.DailyUploadWorker
+import com.example.pixeldiet.data.AppDatabase
+import com.example.pixeldiet.data.DatabaseProvider
+
 //import com.example.pixeldiet.data.AppDatabase
 //import com.example.pixeldiet.data.DailyUsageDao
 //import com.example.pixeldiet.data.GroupDao
@@ -72,7 +77,8 @@ class MainActivity : ComponentActivity() {
 
         // ⭐️ 3. "사용 시간 권한"은 그 다음에 확인합니다.
         checkUsageStatsPermission()
-
+        val db = DatabaseProvider.getDatabase(this)
+        AppBackupManager.init(db)
         setContent {
             PixelDietTheme {
                 AppNavigation()
@@ -148,4 +154,5 @@ class MainActivity : ComponentActivity() {
             viewModel.uploadDailyUsageToFirebase()
         }
     }
+
 }

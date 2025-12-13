@@ -71,6 +71,28 @@ fun FriendScreenContent(
     groupViewModel: GroupViewModel,
     navController: NavHostController
 ) {
+    val isDataReady by viewModel.isDataReady.collectAsState()
+    Log.d("MainScreen", "isDataReady: $isDataReady")
+    if (!isDataReady) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    val isData_Ready by groupViewModel.isDataReady.collectAsState()
+    Log.d("MainScreen", "isDataReady: $isData_Ready")
+    if (!isData_Ready) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     val friendRequestsReceived by viewModel.friendRequestsReceived.collectAsState()
     val friendRequestsSent by viewModel.friendRequestsSent.collectAsState()
     val friendList by viewModel.friendList.collectAsState(initial = emptyList())
