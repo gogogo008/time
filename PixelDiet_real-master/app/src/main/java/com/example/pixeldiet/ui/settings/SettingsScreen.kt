@@ -65,7 +65,8 @@ fun SettingsScreen(viewModel: SharedViewModel = viewModel()) {
     val context = LocalContext.current
     val activity = context as? Activity
     val coroutineScope = rememberCoroutineScope()
-
+    var showNicknameDialog by remember { mutableStateOf(false) }
+    var nicknameInput by remember { mutableStateOf("") }
     // Room Dao
     val dao = remember { DatabaseProvider.getDatabase(context).dailyUsageDao() }
     val userProfile by viewModel.userProfile.collectAsState()
@@ -146,7 +147,12 @@ fun SettingsScreen(viewModel: SharedViewModel = viewModel()) {
 
                             Text(displayName, fontSize = 18.sp)
                             Spacer(Modifier.width(8.dp))
-                            TextButton(onClick = { /* 닉네임 변경 */ }) {
+                            TextButton(
+                                onClick = {
+                                    nicknameInput = displayName
+                                    showNicknameDialog = true
+                                }
+                            ) {
                                 Text("닉네임 변경")
                             }
                         }
@@ -272,6 +278,38 @@ fun SettingsScreen(viewModel: SharedViewModel = viewModel()) {
             onIntervalSelected = { newSettings, interval -> newSettings.repeatIntervalMinutes = interval }
         )
     }
+    if (showNicknameDialog) {
+        AlertDialog(
+            onDismissRequest = { showNicknameDialog = false },
+            title = { Text("닉네임 변경") },
+            text = {
+                OutlinedTextField(
+                    value = nicknameInput,
+                    onValueChange = { nicknameInput = it },
+                    label = { Text("새 닉네임") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (nicknameInput.isNotBlank()) {
+                            viewModel.updateNickname(nicknameInput)
+                        }
+                        showNicknameDialog = false
+                    }
+                ) {
+                    Text("저장")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNicknameDialog = false }) {
+                    Text("취소")
+                }
+            }
+        )
+    }
+
 }
 
 @Composable

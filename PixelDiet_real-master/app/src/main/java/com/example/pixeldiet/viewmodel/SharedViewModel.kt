@@ -15,6 +15,7 @@ import com.example.pixeldiet.repository.UsageRepository
 import com.github.mikephil.charting.data.Entry
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
 import com.prolificinteractive.materialcalendarview.CalendarDay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -403,7 +404,14 @@ class SharedViewModel(application: Application) : AndroidViewModel(application) 
         super.onCleared()
         auth.removeAuthStateListener(authListener)
     }
+    fun updateNickname(newName: String) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
 
+        FirebaseFirestore.getInstance()
+            .collection("profile")
+            .document(uid)
+            .update("name", newName)
+    }
     // ------------------- Firestore -> Room 동기화 -------------------
     private suspend fun syncFromFirestoreInternal(uid: String, force: Boolean) {
         if (!force && hasSyncedOnce) {
